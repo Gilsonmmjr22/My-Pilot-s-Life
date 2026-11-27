@@ -55,7 +55,7 @@ nav button{background:transparent;color:var(--muted);padding:7px 10px;font-weigh
 <label for="flightTime">Departure time</label><input id="flightTime" type="time">
 <div class="form-actions"><button type="submit">Save flight</button></div>
 </form></div>
-<div class="section-head"><h2>All scheduled flights</h2></div><div class="card" id="flightList"><div class="empty">Your schedule is empty.</div></div>
+<div class="card"><h2 style="margin-top:0">Import APL V2 Schedule</h2><p class="notice">Import your roster from Excel. Dates are not included in the APL report.</p><input id="scheduleExcel" type="file" accept=".xlsx,.xls"><button id="importSchedule" type="button">Import schedule</button><p id="scheduleStatus" class="notice" aria-live="polite"></p></div><div class="section-head"><h2>All scheduled flights</h2></div><div class="card" id="flightList"><div class="empty">Your schedule is empty.</div></div>
 </section>
 <section id="logbook" class="view">
 <div class="welcome"><h1>Logbook</h1><p>Your personal flight records.</p></div>
@@ -130,7 +130,7 @@ function render(){
  const flights=get('mpl_flights'), logs=get('mpl_logs');
  document.getElementById('flightCount').textContent=logs.length;
  document.getElementById('totalTime').textContent=logs.reduce((s,x)=>s+Number(x.hours||0),0).toFixed(1)+' h';
- const flightHtml=(arr)=>arr.length?arr.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((f,i)=>'<div class="flight"><div class="row"><div><div class="route">'+esc(f.route)+'</div><div class="meta">'+esc(f.number)+' · '+esc(f.date)+' '+esc(f.time||'')+'</div></div><button class="secondary" onclick="removeItem(\'mpl_flights\','+flights.indexOf(f)+')">×</button></div></div>').join(''):'<div class="empty">No flights scheduled yet.</div>';
+ const flightHtml=(arr)=>arr.length?arr.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((f,i)=>'<div class="flight"><div class="row"><div><div class="route">'+esc(f.route)+'</div><div class="meta">'+esc(f.number)+' · '+esc(f.date||'Date not assigned')+' · '+esc(f.time||'')+(f.arrivalTime?' – '+esc(f.arrivalTime):'')+(f.aircraft?' · '+esc(f.aircraft):'')+(f.callsign?' · '+esc(f.callsign):'')+(f.duration?' · '+esc(f.duration):'')+(f.distance?' · '+esc(f.distance)+' NM':'')+'</div></div><button class="secondary" onclick="removeItem(\'mpl_flights\','+flights.indexOf(f)+')">×</button></div></div>').join(''):'<div class="empty">No flights scheduled yet.</div>';
  document.getElementById('flightList').innerHTML=flightHtml(flights);
  document.getElementById('upcoming').innerHTML=flightHtml(flights.slice(0,3));
  document.getElementById('logList').innerHTML=logs.length?logs.slice().reverse().map((l,i)=>'<div class="flight"><div class="row"><div><div class="route">'+esc(l.route)+'</div><div class="meta">'+esc(l.aircraft||'Aircraft not specified')+' · '+esc(l.date)+' · '+Number(l.hours).toFixed(1)+' h</div></div><button class="secondary" onclick="removeItem(\'mpl_logs\','+(logs.length-1-i)+')">×</button></div></div>').join(''):'<div class="empty">No completed flights logged yet.</div>';
@@ -186,6 +186,31 @@ document.getElementById('importAplBtn').addEventListener('click',async()=>{
   }
   set('mpl_logs',logs);render();status.textContent='Import complete: '+added+' flights added; '+skipped+' duplicates skipped ('+sheetUsed+').';if(cloudUser)await syncAll();
  }catch(err){status.textContent='Import failed: '+err.message}
+});
+document.getElementById('importSchedule').addEventListener('click',async()=>{
+ const file=document.getElementById('scheduleExcel').files[0], status=document.getElementById('scheduleStatus');
+ if(!file){status.textContent='Choose your schedule Excel file.';return}
+ try{
+ const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+ let rows,headers,hi;
+ for(const name of wb.SheetNames){
+ const r=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false,defval:''});
+ const i=r.findIndex(row=>{const h=row.map(normHeader);return ['flightnumber','departureairport','arrivalairport','departuretime','arrivaltime'].every(x=>h.includes(x))});
+ if(i>=0){rows=r;hi=i;headers=r[i].map(normHeader);break}
+ }
+ if(!rows)throw new Error('Schedule header not recognized.');
+ const flights=get('mpl_flights');let added=0,skipped=0;
+ const seen=new Set(flights.map(f=>f.importKey).filter(Boolean));
+ for(const row of rows.slice(hi+1)){
+ const val=k=>cellText(row[headers.indexOf(k)]);
+ const number=val('flightnumber'),dep=val('departureairport'),arr=val('arrivalairport'),time=val('departuretime');
+ if(!number||!dep||!arr)continue;
+ const key=[number,dep,arr,time,val('arrivaltime')].join('|');
+ if(seen.has(key)){skipped++;continue}
+ flights.push({id:'apl-schedule:'+key,importKey:key,source:'APL V2',number,callsign:val('callsign'),route:dep.split(/\s/)[0]+' → '+arr.split(/\s/)[0],departureAirport:dep,arrivalAirport:arr,time,arrivalTime:val('arrivaltime'),duration:val('duration'),distance:val('distancenm'),aircraft:val('aircraft'),date:''});seen.add(key);added++;
+ }
+ set('mpl_flights',flights);render();status.textContent='Import complete: '+added+' flights added; '+skipped+' duplicates skipped. Check Settings for cloud sync status.';if(cloudUser)await syncAll();
+ }catch(error){status.textContent='Import failed: '+error.message}
 });
 function exportData(){const blob=new Blob([JSON.stringify({flights:get('mpl_flights'),logbook:get('mpl_logs')},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-pilot-life-data.json';a.click();URL.revokeObjectURL(a.href)}
 function clearData(){if(confirm('Delete all locally saved flights and logbook entries?')){localStorage.removeItem('mpl_flights');localStorage.removeItem('mpl_logs');render()}}
