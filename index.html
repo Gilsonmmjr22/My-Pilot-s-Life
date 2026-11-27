@@ -135,7 +135,7 @@ async function drawFlightMap(){
  if(!document.getElementById('map').classList.contains('active'))return;
  const status=document.getElementById('mapStatus'),generation=++mapGeneration;
  if(!window.L){status.textContent='Map library unavailable. Connect to the internet and reload.';return}
- if(!flightMap){flightMap=L.map('flightMap').setView([45,0],3);L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap contributors &copy; CARTO',maxZoom:19}).addTo(flightMap);mapLayer=L.layerGroup().addTo(flightMap)}
+ if(!flightMap){flightMap=L.map('flightMap').setView([45,0],3);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',maxZoom:19}).addTo(flightMap);mapLayer=L.layerGroup().addTo(flightMap)}
  flightMap.invalidateSize();const coords=await airportCoordinates();if(generation!==mapGeneration)return;
  const filter=document.getElementById('mapFilter').value, entries=[...(filter==='scheduled'?[]:get('mpl_logs').map(f=>({f,kind:'Completed',color:'#67a7ff'}))),...(filter==='completed'?[]:get('mpl_flights').map(f=>({f,kind:'Scheduled',color:'#facc15'})))];
  mapLayer.clearLayers();const airports=new Map(),bounds=[];let plotted=0,missing=0;
