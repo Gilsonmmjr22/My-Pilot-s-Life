@@ -92,25 +92,33 @@ function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function removeItem(k,i){const a=get(k);a.splice(i,1);set(k,a);render()}
 document.getElementById('flightForm').addEventListener('submit',e=>{e.preventDefault();const a=get('mpl_flights');a.push({number:flightNo.value,route:route.value,date:flightDate.value,time:flightTime.value});set('mpl_flights',a);e.target.reset();render()});
 document.getElementById('logForm').addEventListener('submit',e=>{e.preventDefault();const a=get('mpl_logs');a.push({route:logRoute.value,aircraft:logAircraft.value,hours:logHours.value,date:logDate.value});set('mpl_logs',a);e.target.reset();render()});
-function excelTime(value){if(value==null||value==='')return 0;if(typeof value==='number')return value*24;const m=String(value).match(/^(\\d+):(\\d{2})(?::(\\d{2}))?$/);return m?Number(m[1])+Number(m[2])/60+Number(m[3]||0)/3600:0}
+function excelTime(value){if(value==null||value==='')return 0;if(typeof value==='number')return value*24;const m=String(value).match(/^(\d+):(\d{2})(?::(\d{2}))?$/);return m?Number(m[1])+Number(m[2])/60+Number(m[3]||0)/3600:0}
 function cellText(v){return v==null?'':String(v).trim()}
-function normHeader(v){return cellText(v).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]/g,'')}
+function normHeader(v){return cellText(v).toLowerCase().replace(/[^a-z0-9]/g,'')}
 document.getElementById('importAplBtn').addEventListener('click',async()=>{
  const file=document.getElementById('aplExcel').files[0],status=document.getElementById('importStatus');
  if(!file){status.textContent='Please choose your APL Excel file first.';return}
  if(!window.XLSX){status.textContent='Excel reader unavailable. Connect to the internet, refresh the app and try again.';return}
  try{
   const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});
-  let rows=null,headers=null,hi=-1,sheetUsed='';
+  let rows=null,headers=null,hi=-1,sheetUsed='',diagnostic=[];
+  const flightAliases=['flightnumber','flightno','flight'];
   for(const sheetName of wb.SheetNames){
-   const candidate=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,raw:false,defval:''});
-   const rowIndex=candidate.findIndex(row=>row.some(v=>normHeader(v)==='airline')&&row.some(v=>normHeader(v)==='flightnumber'));
-   if(rowIndex>=0){rows=candidate;hi=rowIndex;sheetUsed=sheetName;break}
+   const candidate=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,raw:false,defval:'',blankrows:false});
+   for(let i=0;i<candidate.length;i++){
+    const hs=candidate[i].map(normHeader);
+    const hasAirline=hs.includes('airline');
+    const hasFlight=hs.some(h=>flightAliases.includes(h)||h.includes('flightnumber')||h==='flight#');
+    const hasRoute=hs.includes('departure')&&hs.includes('arrival');
+    if((hasAirline&&hasFlight)||(hasRoute&&hs.includes('flighttime'))){rows=candidate;hi=i;sheetUsed=sheetName;break}
+   }
+   if(rows)break;
+   diagnostic.push(sheetName+': '+candidate.slice(0,14).map(row=>row.map(cellText).filter(Boolean).join(' / ')).filter(Boolean).join(' || '));
   }
-  if(!rows)throw new Error('Could not find the header row. Make sure this is the APL V2 Logbook export (Excel), not a print/design template.');
+  if(!rows)throw new Error('Header not recognized. Sheet preview: '+diagnostic.join(' ; ').slice(0,850));
   headers=rows[hi].map(normHeader);
   const aliases={
-   'Airline':['airline'],'Flight number':['flightnumber','flightno'],'Callsign':['callsign'],
+   'Airline':['airline'],'Flight number':['flightnumber','flightno','flight','flight#'],'Callsign':['callsign'],
    'Departure':['departure','dep'],'Arrival':['arrival','arr'],
    'Departure time':['departuretime','depttime'],'Arrival time':['arrivaltime','arrtime'],
    'Block time':['blocktime'],'Flight time':['flighttime'],'Aircraft':['aircraft'],
