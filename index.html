@@ -29,7 +29,7 @@ nav button{background:transparent;color:var(--muted);padding:7px 10px;font-weigh
 .view{display:none}.view.active{display:block}.notice{font-size:12px;color:var(--muted);line-height:1.5}
 @media(min-width:600px){main{padding-top:32px}.welcome h1{font-size:34px}}
 </style>
-</head>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"><script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script><style>#flightMap{height: min(60vh,540px);min-height:300px;border-radius:14px;background:#111827}.leaflet-container{color:#111}nav button{padding:7px 5px;font-size:13px}</style></head>
 <body>
 <header><div class="brand">MY PILOT <span>LIFE</span></div><div class="tag">FLIGHT DECK · PERSONAL</div></header>
 <main>
@@ -70,12 +70,12 @@ nav button{background:transparent;color:var(--muted);padding:7px 10px;font-weigh
 <div class="card"><h2 style="margin-top:0">Import APL V2 Logbook</h2><p class="notice">Choose the Excel report exported from A Pilot’s Life V2. Existing flights are checked to avoid importing duplicates.</p><label for="aplExcel">APL Logbook (.xlsx, .xls)</label><input id="aplExcel" type="file" accept=".xlsx,.xls" /><div class="form-actions"><button type="button" id="importAplBtn">Import Excel logbook</button></div><p class="notice" id="importStatus" aria-live="polite">Your Excel file is processed in this browser; it is not uploaded to a server.</p></div>
 <div class="section-head"><h2>Flight history</h2></div><div class="card" id="logList"><div class="empty">No completed flights logged yet.</div></div>
 </section>
-<section id="settings" class="view">
+<section id="map" class="view"><div class="welcome"><h1>Flight Map</h1><p>Explore your virtual aviation career.</p></div><div class="card"><label for="mapFilter">Show flights</label><select id="mapFilter"><option value="all">All flights</option><option value="completed">Completed</option><option value="scheduled">Scheduled</option></select><div id="flightMap"></div><p class="notice" id="mapStatus">Loading airport coordinates…</p><p class="notice"><span style="color:#67a7ff">● Completed</span> &nbsp; <span style="color:#facc15">● Scheduled</span> · Routes are illustrative, not actual flight tracks.</p><button class="secondary" id="mapFit">Fit routes</button></div></section><section id="settings" class="view">
 <div class="welcome"><h1>Settings</h1><p>App preferences and data.</p></div>
 <div class="card"><h2 style="margin-top:0">Cloud account</h2><p class="notice">Sign in on each device to sync your logbook and schedule securely.</p><div id="cloudStatus" class="notice" aria-live="polite">Not connected.</div><form id="authForm"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="current-password" minlength="6" placeholder="At least 6 characters" required><div class="form-actions"><button type="submit">Sign in</button><button type="button" class="secondary" id="signUpBtn">Create account</button><button type="button" class="secondary" id="signOutBtn">Sign out</button></div></form><p class="notice">Your data is stored in your Supabase account. Keep your password private.</p></div><div class="card"><h2 style="margin-top:0">My Pilot Life</h2><p class="muted">Version 0.2 · English · Dark mode</p><p class="notice">Your data remains available locally and can sync to your cloud account. The app shell is cached for offline use after the first visit. This app does not connect directly to SimBitWorld A Pilot’s Life; use its Excel export to import your logbook.</p><button class="secondary" onclick="exportData()">Export my data</button> <button class="secondary" onclick="clearData()">Clear local data</button></div>
 </section>
 </main>
-<nav><button class="active" data-view="dashboard" onclick="showView('dashboard')">Home</button><button data-view="schedule" onclick="showView('schedule')">Schedule</button><button data-view="logbook" onclick="showView('logbook')">Logbook</button><button data-view="settings" onclick="showView('settings')">Settings</button></nav>
+<nav><button class="active" data-view="dashboard" onclick="showView('dashboard')">Home</button><button data-view="schedule" onclick="showView('schedule')">Schedule</button><button data-view="logbook" onclick="showView('logbook')">Logbook</button><button data-view="map" onclick="showView('map')">Map</button><button data-view="settings" onclick="showView('settings')">Settings</button></nav>
 <script>
 const get=(k)=>JSON.parse(localStorage.getItem(k)||"[]");
 const SUPABASE_URL='https://idhqeqjnuwvdjueglzpu.supabase.co';
@@ -125,8 +125,30 @@ document.getElementById('signOutBtn').addEventListener('click',async()=>{
 cloud.auth.onAuthStateChange((_event,session)=>{cloudUser=session?.user||null;if(cloudUser)setTimeout(()=>syncAll(),0);else cloudMessage('Not signed in. Your current data remains on this device.')});
 
 const set=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+let flightMap=null,mapLayer=null,airportPromise=null,mapBounds=null,mapGeneration=0;
+const fallbackAirports={EHAM:[52.3086,4.7639],ESSA:[59.6519,17.9186],ESGG:[57.6628,12.2798],LPPR:[41.2481,-8.6814],LROP:[44.5711,26.085],CYUL:[45.4706,-73.7408],CYQM:[46.1122,-64.6786],CYYZ:[43.6777,-79.6248],LDSP:[43.5389,16.298],CYHZ:[44.8808,-63.5086]};
+async function airportCoordinates(){
+ if(!airportPromise)airportPromise=(async()=>{const coords={...fallbackAirports};try{const res=await fetch('https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat');if(!res.ok)throw Error('Airport database unavailable');for(const line of (await res.text()).split('\n')){const fields=line.match(/"(?:[^"]|"")*"|[^,]+/g);if(!fields||fields.length<8)continue;const code=fields[5].replace(/"/g,'');const lat=Number(fields[6]),lon=Number(fields[7]);if(/^[A-Z]{4}$/.test(code)&&Number.isFinite(lat)&&Number.isFinite(lon))coords[code]=[lat,lon]}}catch(e){airportPromise=null}return coords})();return airportPromise;
+}
+function routeCodes(f){const parts=String(f.route||'').toUpperCase().match(/\b[A-Z]{4}\b/g)||[];return parts.slice(0,2)}
+async function drawFlightMap(){
+ if(!document.getElementById('map').classList.contains('active'))return;
+ const status=document.getElementById('mapStatus'),generation=++mapGeneration;
+ if(!window.L){status.textContent='Map library unavailable. Connect to the internet and reload.';return}
+ if(!flightMap){flightMap=L.map('flightMap').setView([45,0],3);L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap contributors &copy; CARTO',maxZoom:19}).addTo(flightMap);mapLayer=L.layerGroup().addTo(flightMap)}
+ flightMap.invalidateSize();const coords=await airportCoordinates();if(generation!==mapGeneration)return;
+ const filter=document.getElementById('mapFilter').value, entries=[...(filter==='scheduled'?[]:get('mpl_logs').map(f=>({f,kind:'Completed',color:'#67a7ff'}))),...(filter==='completed'?[]:get('mpl_flights').map(f=>({f,kind:'Scheduled',color:'#facc15'})))];
+ mapLayer.clearLayers();const airports=new Map(),bounds=[];let plotted=0,missing=0;
+ for(const {f,kind,color} of entries){const [a,b]=routeCodes(f);if(!coords[a]||!coords[b]){missing++;continue}const start=coords[a],end=coords[b];const adjusted=[end[0],end[1]+(end[1]-start[1]>180?-360:end[1]-start[1]<-180?360:0)];L.polyline([start,adjusted],{color,weight:3,opacity:.8,dashArray:kind==='Scheduled'?'7 6':null}).bindPopup('<b>'+esc(f.number||kind)+'</b><br>'+esc(a+' → '+b)+'<br>'+esc(kind)+' · '+esc(f.aircraft||'')+'<br>'+esc(f.date||'')+' '+esc(f.time||'')).addTo(mapLayer);airports.set(a,start);airports.set(b,end);bounds.push(start,adjusted);plotted++}
+ for(const [code,point] of airports)L.circleMarker(point,{radius:5,color:'#e2e8f0',fillColor:'#67a7ff',fillOpacity:1,weight:1}).bindPopup(esc(code)).addTo(mapLayer);
+ mapBounds=bounds.length?L.latLngBounds(bounds):null;if(mapBounds)flightMap.fitBounds(mapBounds,{padding:[24,24],maxZoom:8});
+ status.textContent=plotted+' flights mapped · '+airports.size+' airports'+(missing?' · '+missing+' flights missing airport coordinates':'');
+}
+document.getElementById('mapFilter').addEventListener('change',drawFlightMap);
+document.getElementById('mapFit').addEventListener('click',()=>{if(flightMap&&mapBounds)flightMap.fitBounds(mapBounds,{padding:[24,24],maxZoom:8})});
 function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===id));render()}
 function render(){
+ if(document.getElementById('map').classList.contains('active'))drawFlightMap();
  const flights=get('mpl_flights'), logs=get('mpl_logs');
  document.getElementById('flightCount').textContent=logs.length;
  document.getElementById('totalTime').textContent=logs.reduce((s,x)=>s+Number(x.hours||0),0).toFixed(1)+' h';
