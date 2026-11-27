@@ -92,19 +92,35 @@ function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function removeItem(k,i){const a=get(k);a.splice(i,1);set(k,a);render()}
 document.getElementById('flightForm').addEventListener('submit',e=>{e.preventDefault();const a=get('mpl_flights');a.push({number:flightNo.value,route:route.value,date:flightDate.value,time:flightTime.value});set('mpl_flights',a);e.target.reset();render()});
 document.getElementById('logForm').addEventListener('submit',e=>{e.preventDefault();const a=get('mpl_logs');a.push({route:logRoute.value,aircraft:logAircraft.value,hours:logHours.value,date:logDate.value});set('mpl_logs',a);e.target.reset();render()});
-function excelTime(value){if(value==null||value==='')return 0;if(typeof value==='number')return value*24;const m=String(value).match(/^(\d+):(\d{2})(?::(\d{2}))?$/);return m?Number(m[1])+Number(m[2])/60+Number(m[3]||0)/3600:0}
+function excelTime(value){if(value==null||value==='')return 0;if(typeof value==='number')return value*24;const m=String(value).match(/^(\\d+):(\\d{2})(?::(\\d{2}))?$/);return m?Number(m[1])+Number(m[2])/60+Number(m[3]||0)/3600:0}
 function cellText(v){return v==null?'':String(v).trim()}
+function normHeader(v){return cellText(v).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]/g,'')}
 document.getElementById('importAplBtn').addEventListener('click',async()=>{
  const file=document.getElementById('aplExcel').files[0],status=document.getElementById('importStatus');
  if(!file){status.textContent='Please choose your APL Excel file first.';return}
  if(!window.XLSX){status.textContent='Excel reader unavailable. Connect to the internet, refresh the app and try again.';return}
  try{
-  const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true}),ws=wb.Sheets[wb.SheetNames[0]],rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
-  const hi=rows.findIndex(r=>r.some(v=>cellText(v)==='Airline')&&r.some(v=>cellText(v)==='Flight number'));
-  if(hi<0)throw new Error('APL Logbook column headings were not found.');
-  const headers=rows[hi].map(cellText),col=n=>headers.indexOf(n);
+  const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});
+  let rows=null,headers=null,hi=-1,sheetUsed='';
+  for(const sheetName of wb.SheetNames){
+   const candidate=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,raw:false,defval:''});
+   const rowIndex=candidate.findIndex(row=>row.some(v=>normHeader(v)==='airline')&&row.some(v=>normHeader(v)==='flightnumber'));
+   if(rowIndex>=0){rows=candidate;hi=rowIndex;sheetUsed=sheetName;break}
+  }
+  if(!rows)throw new Error('Could not find the header row. Make sure this is the APL V2 Logbook export (Excel), not a print/design template.');
+  headers=rows[hi].map(normHeader);
+  const aliases={
+   'Airline':['airline'],'Flight number':['flightnumber','flightno'],'Callsign':['callsign'],
+   'Departure':['departure','dep'],'Arrival':['arrival','arr'],
+   'Departure time':['departuretime','depttime'],'Arrival time':['arrivaltime','arrtime'],
+   'Block time':['blocktime'],'Flight time':['flighttime'],'Aircraft':['aircraft'],
+   'Simulator':['simulator'],'Score':['score'],'XP':['xp'],
+   'Landing rate':['landingrate'],'Landing force':['landingforce']
+  };
+  const col=name=>{for(const alias of aliases[name]||[normHeader(name)]){const i=headers.indexOf(alias);if(i>=0)return i}return -1};
   const required=['Airline','Flight number','Departure','Arrival','Departure time','Flight time','Aircraft'];
-  if(required.some(n=>col(n)<0))throw new Error('This worksheet is missing expected APL columns.');
+  const missing=required.filter(name=>col(name)<0);
+  if(missing.length)throw new Error('Missing columns: '+missing.join(', ')+'. Found: '+headers.filter(Boolean).join(' | '));
   const logs=get('mpl_logs'),seen=new Set(logs.map(x=>x.importKey).filter(Boolean));let added=0,skipped=0;
   for(const r of rows.slice(hi+1)){
    const no=cellText(r[col('Flight number')]),dep=cellText(r[col('Departure')]),arr=cellText(r[col('Arrival')]),out=cellText(r[col('Departure time')]);
@@ -113,7 +129,7 @@ document.getElementById('importAplBtn').addEventListener('click',async()=>{
    logs.push({source:'APL V2',importKey:key,number:no,airline:cellText(r[col('Airline')]),callsign:cellText(r[col('Callsign')]),route:dep+' → '+arr,departure:out,arrival:cellText(r[col('Arrival time')]),blockTime:cellText(r[col('Block time')]),aircraft:cellText(r[col('Aircraft')]),simulator:cellText(r[col('Simulator')]),hours:excelTime(r[col('Flight time')]),date:out.slice(0,10),score:cellText(r[col('Score')]),xp:cellText(r[col('XP')]),landingRate:cellText(r[col('Landing rate')]),landingForce:cellText(r[col('Landing force')])});
    seen.add(key);added++;
   }
-  set('mpl_logs',logs);render();status.textContent='Import complete: '+added+' flights added; '+skipped+' duplicates skipped.';
+  set('mpl_logs',logs);render();status.textContent='Import complete: '+added+' flights added; '+skipped+' duplicates skipped ('+sheetUsed+').';
  }catch(err){status.textContent='Import failed: '+err.message}
 });
 function exportData(){const blob=new Blob([JSON.stringify({flights:get('mpl_flights'),logbook:get('mpl_logs')},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-pilot-life-data.json';a.click();URL.revokeObjectURL(a.href)}
