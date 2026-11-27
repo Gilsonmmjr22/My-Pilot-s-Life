@@ -103,11 +103,11 @@ document.getElementById('importAplBtn').addEventListener('click',async()=>{
   const hi=rows.findIndex(r=>r.some(v=>cellText(v)==='Airline')&&r.some(v=>cellText(v)==='Flight number'));
   if(hi<0)throw new Error('APL Logbook column headings were not found.');
   const headers=rows[hi].map(cellText),col=n=>headers.indexOf(n);
-  const required=['Airline','Flight number','Departure ','Arrival','Departure time','Flight time','Aircraft'];
+  const required=['Airline','Flight number','Departure','Arrival','Departure time','Flight time','Aircraft'];
   if(required.some(n=>col(n)<0))throw new Error('This worksheet is missing expected APL columns.');
   const logs=get('mpl_logs'),seen=new Set(logs.map(x=>x.importKey).filter(Boolean));let added=0,skipped=0;
   for(const r of rows.slice(hi+1)){
-   const no=cellText(r[col('Flight number')]),dep=cellText(r[col('Departure ')]),arr=cellText(r[col('Arrival')]),out=cellText(r[col('Departure time')]);
+   const no=cellText(r[col('Flight number')]),dep=cellText(r[col('Departure')]),arr=cellText(r[col('Arrival')]),out=cellText(r[col('Departure time')]);
    if(!no||!dep||!arr)continue;
    const key=[no,dep,arr,out].join('|');if(seen.has(key)){skipped++;continue}
    logs.push({source:'APL V2',importKey:key,number:no,airline:cellText(r[col('Airline')]),callsign:cellText(r[col('Callsign')]),route:dep+' → '+arr,departure:out,arrival:cellText(r[col('Arrival time')]),blockTime:cellText(r[col('Block time')]),aircraft:cellText(r[col('Aircraft')]),simulator:cellText(r[col('Simulator')]),hours:excelTime(r[col('Flight time')]),date:out.slice(0,10),score:cellText(r[col('Score')]),xp:cellText(r[col('XP')]),landingRate:cellText(r[col('Landing rate')]),landingForce:cellText(r[col('Landing force')])});
